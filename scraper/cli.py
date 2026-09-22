@@ -8,10 +8,25 @@ from scraper.source import LeagueSecretaryScraper
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fetch Rainbowlers League reports from League Secretary.")
-    parser.add_argument("--output", type=Path, default=Path("data"), help="Directory for collected data.")
-    parser.add_argument("--backfill", action="store_true", help="Fetch all discovered supported reports.")
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging.")
+    parser = argparse.ArgumentParser(
+        description="Fetch Rainbowlers League reports from League Secretary."
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("data"),
+        help="Directory for collected data.",
+    )
+    parser.add_argument(
+        "--backfill",
+        action="store_true",
+        help="Fetch all discovered supported reports.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging.",
+    )
 
     args = parser.parse_args()
 
