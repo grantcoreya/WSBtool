@@ -547,3 +547,371 @@ class LeagueSecretaryScraper:
                 "/team/history/",
             )
         ) and not self._is_report_family(url)
+
+    def _is_rendered_report(self, url: str) -> bool:
+        """Return True for individual interactive report pages."""
+
+        path = urlparse(url).path.lower()
+
+        rendered_markers = (
+            "/league/standings/",
+            "/league/recaps/",
+            "/league/results/",
+            "/league/schedule/",
+            "/league/statistics/",
+            "/league/stats/",
+            "/bowler/history/",
+            "/team/history/",
+        )
+
+        return (
+            any(marker in path for marker in rendered_markers)
+            and not self._is_report_family(url)
+        )
+
+    def _is_report_family(self, url: str) -> bool:
+        """Return True for landing pages such as /standings/122895."""
+
+        path = urlparse(url).path.rstrip("/").lower()
+
+        family_paths = (
+            f"/league/standings/{LEAGUE_ID}",
+            f"/league/recaps/{LEAGUE_ID}",
+            f"/league/results/{LEAGUE_ID}",
+            f"/league/schedule/{LEAGUE_ID}",
+            f"/league/statistics/{LEAGUE_ID}",
+            f"/league/stats/{LEAGUE_ID}",
+        )
+
+        return path in family_paths
+
+    def _is_subscription_pdf(self, url: str) -> bool:
+        """Return True for PDF/shared-report URLs requiring a subscription."""
+
+        lower_url = url.lower()
+
+        return (
+            lower_url.endswith(".pdf")
+            or "/reports/shared" in lower_url
+        )
+
+    def _title_from_path(self, path: str) -> str:
+        value = (
+            path.rstrip("/")
+            .split("/")[-1]
+            .replace("-", " ")
+        )
+
+        return value.title() or "League Secretary report"
+
+    def _deduplicate_reports(
+        self,
+        reports: list[ReportRecord],
+    ) -> list[ReportRecord]:
+        """Remove duplicate report URLs while preserving the latest record."""
+
+        unique: dict[str, ReportRecord] = OrderedDict()
+
+        for report in reports:
+            unique[report.url.lower()] = report
+
+        return list(unique.values())
+
+    def _load_index(self) -> dict[str, dict[str, Any]]:
+        """Load previously saved report metadata from data/index.json."""
+
+        if not self.index_path.exists():
+            return {}
+
+        try:
+            payload = json.loads(
+                self.index_path.read_text(
+                    encoding="utf-8",
+                )
+            )
+
+            records = payload.get(
+                "records",
+                {},
+            )
+
+            if isinstance(records, dict):
+                return records
+
+        except (
+            json.JSONDecodeError,
+            OSError,
+        ):
+            logger.warning(
+                "Could not read %s; starting with an empty index",
+                self.index_path,
+            )
+
+        return {}
+
+    def _save_index(
+        self,
+        state: dict[str, dict[str, Any]],
+    ) -> None:
+        """Save report metadata to data/index.json."""
+
+        payload = {
+            "league": "Rainbowlers League",
+            "records": state,
+            "updated_at": datetime.now(
+                timezone.utc
+            ).isoformat(),
+        }
+
+        self.index_path.write_text(
+            json.dumps(
+                payload,
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+    def _save_text_file(
+        self,
+        path: Path,
+        content: str,
+    ) -> None:
+        """Create the parent directory and save text content."""
+
+        path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        path.write_text(
+            content,
+            encoding="utf-8",
+        )
+
+    def _add_error(
+        self,
+        result: dict[str, Any],
+        url: str,
+        exc: Exception,
+    ) -> None:
+        """Add a readable error to the scraper result."""
+
+        result["errors"].append(
+            {
+                "url": url,
+                "error": str(exc),
+            }
+        )
+
+    def _record_key(
+        self,
+        report: ReportRecord,
+    ) -> str:
+        """Create a stable key for a report."""
+
+        return (
+            f"{report.season}|"
+            f"{report.week}|"
+            f"{report.url}"
+        ).lower()
+
+    def _extract_season(
+        self,
+        title: str,
+        url: str,
+    ) -> str:
+        """Extract the season year from text or the report URL."""
+
+        text = f"{title} {url}"
+
+        for pattern in SEASON_PATTERNS:
+            match = pattern.search(text)
+
+            if match:
+                return match.group(0)
+
+        path_parts = [
+            part
+            for part in urlparse(url).path.split("/")
+            if part
+        ]
+
+        for part in path_parts:
+            if re.fullmatch(
+                r"20[2-9]\d",
+                part,
+            ):
+                return part
+
+        return "Unknown season"
+
+    def _extract_week(
+        self,
+        title: str,
+        url: str,
+    ) -> str:
+        """Extract the week from text or a League Secretary URL."""
+
+        text = f"{title} {url}"
+
+        for pattern in WEEK_PATTERNS:
+            match = pattern.search(text)
+
+            if match:
+                return match.group(0)
+
+        path_parts = [
+            part
+            for part in urlparse(url).path.split("/")
+            if part
+        ]
+
+        # Example:
+        # /122895/2026/f/2
+        #
+        # The first number after the season code is the week.
+        for index, part in enumerate(path_parts):
+            if re.fullmatch(
+                r"20[2-9]\d",
+                part,
+            ):
+                remaining = path_parts[index + 1 :]
+
+                if (
+                    len(remaining) >= 2
+                    and remaining[1].isdigit()
+                ):
+                    return f"Week {remaining[1]}"
+
+                break
+
+        # Do not interpret a bowler ID as a week.
+        if (
+            "bowler" not in url.lower()
+            and path_parts
+            and path_parts[-1].isdigit()
+        ):
+            return f"Report {path_parts[-1]}"
+
+        return "Unknown week"
+
+    def _infer_kind(
+        self,
+        title: str,
+        url: str,
+    ) -> str:
+        """Determine the report category from its title and URL."""
+
+        text = f"{title} {url}".lower()
+
+        if "/league/standings/" in text:
+            return "standings"
+
+        if "/league/recaps/" in text:
+            return "recap"
+
+        if "/bowler/history/" in text:
+            return "bowler history"
+
+        if "/team/history/" in text:
+            return "team history"
+
+        for keyword in (
+            "statistics",
+            "stats",
+            "results",
+            "schedule",
+            "performance",
+            "history",
+        ):
+            if keyword in text:
+                return keyword
+
+        return "report"
+
+    def _is_supported_season(
+        self,
+        season: str,
+        url: str,
+    ) -> bool:
+        """Accept season years 2026 and later."""
+
+        text = f"{season} {url}"
+
+        years = re.findall(
+            r"20([2-9]\d)",
+            text,
+        )
+
+        return any(
+            int(year) >= 26
+            for year in years
+        )
+
+      def _select_latest_relevant_reports(
+        self,
+        reports: list[ReportRecord],
+    ) -> list[ReportRecord]:
+        """Select the newest 20 reports for a normal weekly run."""
+
+        sorted_reports = sorted(
+            reports,
+            key=lambda report: (
+                self._season_sort_key(report.season),
+                self._week_sort_key(report.week),
+                report.url,
+            ),
+            reverse=True,
+        )
+
+        return sorted_reports[:20]
+
+    def _season_sort_key(
+        self,
+        season: str,
+    ) -> tuple[int, str]:
+        match = re.search(
+            r"20([2-9]\d)",
+            season,
+        )
+
+        return (
+            int(match.group(1))
+            if match
+            else 0,
+            season,
+        )
+
+    def _week_sort_key(
+        self,
+        week: str,
+    ) -> int:
+        match = re.search(
+            r"(?:week|report)\s*(\d+)",
+            week,
+            re.IGNORECASE,
+        )
+
+        return int(match.group(1)) if match else 0
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s: %(message)s",
+    )
+
+    scraper = LeagueSecretaryScraper(
+        output_dir="data",
+    )
+
+    print(
+        json.dumps(
+            scraper.run(
+                backfill=False,
+            ),
+            indent=2,
+            sort_keys=True,
+        )
+    )
