@@ -10,7 +10,7 @@ on:
         default: false
 
   schedule:
-    - cron: "0 * * * 5" 
+    - cron: "0 * * * 5"
 
 permissions:
   contents: write
@@ -85,13 +85,24 @@ jobs:
             python -m scraper.cli --output data --verbose
           fi
 
+      - name: Upload scraper diagnostics
+        if: always() && steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-browser-diagnostics
+          path: |
+            data/index.json
+            data/raw/dashboard.html
+            data/raw/*-browser.png
+            data/raw/*-rendered.html
+            data/raw/*-frame-*.html
+          if-no-files-found: warn
+
       - name: Generate website
         if: steps.gate.outputs.run == 'true'
         run: |
           python site_generator.py
 
-          # The site generator links to raw/filename.html.
-          # Copy the downloaded snapshots so those links work on GitHub Pages.
           if [ -d "data/raw" ]; then
             mkdir -p site/raw
             cp -R data/raw/. site/raw/
