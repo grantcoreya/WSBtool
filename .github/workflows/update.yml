@@ -1,0 +1,70 @@
+name: Update Rainbowlers reports
+
+on:
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: Fetch all discoverable historical reports
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Run hourly on Friday; the job gates itself at 13:00 America/Los_Angeles.
+    - cron: '0 * * * 5'
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  TZ: America/Los_Angeles
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check scheduled local time
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$(date +%u)" = "5" -a "$(date +%H)" = "13" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: pip install -r requirements.txt
+      - name: Scrape and build site
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          python -m scraper.cli ${{ inputs.backfill == true && '--backfill' || '' }} --output data
+          python -m site_generator --data data --output site
+      - name: Commit collected data and site
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data site
+          git diff --cached --quiet || git commit -m 'Update Rainbowlers League reports'
+          git push
+      - name: Create failure issue
+        if: failure() && steps.gate.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --title "Rainbowlers update failed ($(date -u +%Y-%m-%d))" --body "The scheduled Rainbowlers report update failed. Review the workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      - name: Email failure alert
+        if: failure() && steps.gate.outputs.run == 'true' && secrets.ALERT_EMAIL_TO != ''
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: Rainbowlers League update failed
+          to: ${{ secrets.ALERT_EMAIL_TO }}
+          from: ${{ secrets.SMTP_FROM }}
+          body: "The Rainbowlers update failed. Review: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
