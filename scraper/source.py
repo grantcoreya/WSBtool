@@ -483,50 +483,67 @@ class LeagueSecretaryScraper:
             f"{report.url}"
         ).lower()
 
-    def _extract_season(
-        self,
-        title: str,
-        url: str,
-    ) -> str:
+    def _extract_season(self, title: str, url: str) -> str:
+        """Extract a season from visible text or a League Secretary URL."""
         text = f"{title} {url}"
 
-        for pattern in SEASON_PATTERNS:
-            match = pattern.search(text)
+    for pattern in SEASON_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return match.group(0)
 
-            if match:
-                return match.group(0)
+    # League Secretary URLs commonly contain:
+    # /122895/2026/f/2
+    path_parts = [
+        part
+        for part in urlparse(url).path.split("/")
+        if part
+    ]
 
-        return "Unknown season"
+    for part in path_parts:
+        if re.fullmatch(r"20[2-9]\d", part):
+            return part
 
-    def _extract_week(
-        self,
-        title: str,
-        url: str,
-    ) -> str:
+    return "Unknown season"
+
+    def _extract_week(self, title: str, url: str) -> str:
+        """Extract a week from text or a League Secretary URL."""
         text = f"{title} {url}"
 
-        for pattern in WEEK_PATTERNS:
-            match = pattern.search(text)
+    for pattern in WEEK_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return match.group(0)
 
-            if match:
-                return match.group(0)
+    path_parts = [
+        part
+        for part in urlparse(url).path.split("/")
+        if part
+    ]
 
-        # For URLs like /2026/f/2, expose the final numeric component as
-        # a report period, but do not treat bowler IDs as week numbers.
-        path_parts = [
-            part
-            for part in urlparse(url).path.split("/")
-            if part
-        ]
+    # Locate the season year and inspect the URL components after it.
+    # Example:
+    # /122895/2026/f/2
+    # /122895/2026/f/2/25
+    for index, part in enumerate(path_parts):
+        if re.fullmatch(r"20[2-9]\d", part):
+            remaining = path_parts[index + 1 :]
 
-        if (
-            "bowler" not in url.lower()
-            and path_parts
-            and path_parts[-1].isdigit()
-        ):
-            return f"Report {path_parts[-1]}"
+            # The first component after the season is the season code:
+            # f = Fall, w = Winter, s = Spring, su = Summer.
+            if len(remaining) >= 2 and remaining[1].isdigit():
+                return f"Week {remaining[1]}"
 
-        return "Unknown week"
+            break
+
+    # Fallback for non-bowler URLs with a trailing numeric report value.
+    if "bowler" not in url.lower() and path_parts:
+        final_part = path_parts[-1]
+
+        if final_part.isdigit():
+            return f"Report {final_part}"
+
+    return "Unknown week"
 
     def _infer_kind(
         self,
