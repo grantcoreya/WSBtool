@@ -631,6 +631,250 @@ class LeagueSecretaryScraper:
             finally:
                 browser.close()
 
+    def _collect_all_report_pages(
+        self,
+        frame: Any,
+        first_page_html: str,
+        url_hash: str,
+    ) -> str:
+        """Collect all Kendo grid pages from a rendered report iframe."""
+
+        # Kendo grids commonly use one of these pager selectors.
+        pager_selectors = (
+            ".k-pager-numbers a",
+            ".k-pager-numbers button",
+            ".k-pager-nav",
+            "[aria-label^='Page']",
+        )
+
+        pager = None
+
+        for selector in pager_selectors:
+            candidate = frame.locator(selector)
+
+            if candidate.count() > 0:
+                pager = candidate
+                logger.info(
+                    "Found report pager: selector=%s controls=%d",
+                    selector,
+                    candidate.count(),
+                )
+                break
+
+        if pager is None:
+            logger.warning(
+                "No pagination controls found in report frame %s",
+                frame.url,
+            )
+            return first_page_html
+
+        page_numbers: list[str] = []
+
+        for index in range(pager.count()):
+            try:
+                control = pager.nth(index)
+                text = control.inner_text().strip()
+
+                if text.isdigit() and text not in page_numbers:
+                    page_numbers.append(text)
+
+            except Exception:
+                continue
+
+        if not page_numbers:
+            logger.warning(
+                "Pager found but no numbered pages detected for %s",
+                frame.url,
+            )
+            return first_page_html
+
+        page_numbers.sort(key=int)
+
+        logger.info(
+            "Report contains %d pages: %s",
+            len(page_numbers),
+            ", ".join(page_numbers),
+        )
+
+        # Capture the first page's rows before navigating.
+        page_fragments: list[str] = [
+            self._extract_table_fragment(frame)
+        ]
+
+        for page_number in page_numbers[1:]:
+            try:
+                current_rows = self._get_report_row_count(frame)
+
+                # Locate the numbered pager control by its visible text.
+                page_control = frame.locator(
+                    "a,button"
+                ).filter(
+                    has_text=re.compile(
+                        rf"^{re.escape(page_number)}$"
+                    )
+                ).last
+
+                if page_control.count() == 0:
+                    logger.warning(
+                        "Could not find pager control for page %s",
+                        page_number,
+                    )
+                    continue
+
+                page_control.click()
+
+                # Wait until the table changes. A short fallback is included
+                # because the page may reuse the same row elements.
+                try:
+                    frame.wait_for_function(
+                        """
+                        ({selector, oldCount}) => {
+                            const rows = document.querySelectorAll(selector);
+                            return rows.length > 0 &&
+                                   rows.length !== oldCount;
+                        }
+                        """,
+                        {
+                            "selector": (
+                                "tbody tr, "
+                                ".k-grid-content tbody tr"
+                            ),
+                            "oldCount": current_rows,
+                        },
+                        timeout=10_000,
+                    )
+                except PlaywrightTimeoutError:
+                    frame.wait_for_timeout(1_000)
+
+                page_html = self._extract_table_fragment(frame)
+                page_fragments.append(page_html)
+
+                logger.info(
+                    "Captured report page %s/%s rows=%d",
+                    page_number,
+                    len(page_numbers),
+                    self._get_report_row_count(frame),
+                )
+
+            except Exception as exc:
+                logger.warning(
+                    "Could not capture report page %s: %s",
+                    page_number,
+                    exc,
+                )
+
+        combined_html = self._combine_table_fragments(
+            first_page_html,
+            page_fragments,
+        )
+
+        self._save_text_file(
+            self.raw_dir / f"{url_hash}-all-pages.html",
+            combined_html,
+        )
+
+        return combined_html
+
+    def _extract_table_fragment(self, frame: Any) -> str:
+        """Return the current report table HTML."""
+
+        table = frame.locator("table").first
+
+        if table.count() == 0:
+            return ""
+
+        return table.evaluate(
+            "(element) => element.outerHTML"
+        )
+
+    def _get_report_row_count(self, frame: Any) -> int:
+        """Count currently visible data rows."""
+
+        selectors = (
+            ".k-grid-content tbody tr",
+            "tbody tr",
+        )
+
+        for selector in selectors:
+            count = frame.locator(selector).count()
+
+            if count > 0:
+                return count
+
+        return 0
+
+    def _combine_table_fragments(
+        self,
+        first_page_html: str,
+        fragments: list[str],
+    ) -> str:
+        """Insert all captured page rows into the first report document."""
+
+        if not fragments:
+            return first_page_html
+
+        document = BeautifulSoup(
+            first_page_html,
+            "html.parser",
+        )
+
+        original_table = document.find("table")
+
+        if original_table is None:
+            logger.warning(
+                "Could not find a table in the first report page"
+            )
+            return first_page_html
+
+        first_fragment = BeautifulSoup(
+            fragments[0],
+            "html.parser",
+        ).find("table")
+
+        if first_fragment is None:
+            return first_page_html
+
+        original_tbody = original_table.find("tbody")
+
+        if original_tbody is None:
+            original_tbody = document.new_tag("tbody")
+            original_table.append(original_tbody)
+
+        # Remove the first page rows from the outer document.
+        original_tbody.clear()
+
+        for fragment in fragments:
+            fragment_table = BeautifulSoup(
+                fragment,
+                "html.parser",
+            ).find("table")
+
+            if fragment_table is None:
+                continue
+
+            fragment_tbody = fragment_table.find("tbody")
+
+            if fragment_tbody is None:
+                continue
+
+            for row in fragment_tbody.find_all(
+                "tr",
+                recursive=False,
+            ):
+                original_tbody.append(row)
+
+        # Remove pagination controls from the saved static snapshot.
+        for selector in (
+            ".k-pager",
+            ".k-pager-wrap",
+            ".k-pager-numbers",
+            "[aria-label='pager']",
+        ):
+            for element in document.select(selector):
+                element.decompose()
+
+        return str(document)
+    
     def _contains_detailed_report_link(self, html: str) -> bool:
         soup = BeautifulSoup(html, "html.parser")
 
