@@ -10,10 +10,7 @@ on:
         default: false
 
   schedule:
-    # GitHub Actions schedules use UTC.
-    # This runs hourly on Friday so the job can select 13:00
-    # in America/Los_Angeles below.
-    - cron: "0 * * * 5"
+    - cron: "0 * * * 5" 
 
 permissions:
   contents: write
