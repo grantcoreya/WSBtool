@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+.env
+.env.*
+
+# Project runtime files
+data/*.json
+data/raw/*
+!data/raw/.gitignore
+site/*
+!site/.gitkeep
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
