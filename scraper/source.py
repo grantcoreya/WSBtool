@@ -232,11 +232,11 @@ class LeagueSecretaryScraper:
                         result["skipped"] += 1
                         continue
 
-                    filename = (
-                        f"{hashlib.sha256(report.url.encode('utf-8'))"
-                        ".hexdigest()[:20]}.html"
-                    )
+                    url_hash = hashlib.sha256(
+                        report.url.encode("utf-8")
+                    ).hexdigest()[:20]
 
+                    filename = f"{url_hash}.html"
                     destination = self.raw_dir / filename
                     destination.write_text(
                         report_html,
