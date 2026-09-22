@@ -610,7 +610,7 @@ class LeagueSecretaryScraper:
                     len(outer_html.encode("utf-8")),
                 )
 
-                if candidates:
+                                if candidates:
                     best_score, best_url, best_html = max(
                         candidates,
                         key=lambda item: item[0],
@@ -624,7 +624,29 @@ class LeagueSecretaryScraper:
                         len(best_html.encode("utf-8")),
                     )
 
+                    report_frame = next(
+                        (
+                            frame
+                            for frame in page.frames
+                            if frame.url == best_url
+                        ),
+                        None,
+                    )
+
+                    if report_frame is not None:
+                        return self._collect_all_report_pages(
+                            report_frame,
+                            best_html,
+                            url_hash,
+                        )
+
+                    logger.warning(
+                        "Could not locate selected live frame: %s",
+                        best_url,
+                    )
+
                     return best_html
+
 
                 return outer_html
 
