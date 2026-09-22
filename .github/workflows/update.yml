@@ -105,7 +105,14 @@ jobs:
 
           if [ -d "data/raw" ]; then
             mkdir -p site/raw
-            cp -R data/raw/. site/raw/
+
+            find data/raw -maxdepth 1 -type f \
+              -name '*.html' \
+              ! -name 'dashboard.html' \
+              ! -name '*-rendered.html' \
+              ! -name '*-frame-*.html' \
+              ! -name '*-all-pages.html' \
+              -exec cp {} site/raw/ \;
           fi
 
       - name: Show generated files
@@ -144,7 +151,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add data site
+          git add data/index.json data/raw/*.html site
 
           if git diff --cached --quiet; then
             echo "No data or site changes to commit."
