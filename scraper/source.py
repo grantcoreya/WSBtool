@@ -64,6 +64,13 @@ WEEK_PATTERNS = (
     re.compile(r"\b(?:round|match|game)\s*#?\d+\b", re.IGNORECASE),
 )
 
+ALLOWED_REPORT_KINDS = {
+    "bowler list",
+    "lane assignments",
+    "recap",
+    "standings",
+    "statistics",
+}
 
 class LeagueSecretaryScraper:
     """Discover and save public League Secretary HTML reports."""
@@ -188,6 +195,12 @@ class LeagueSecretaryScraper:
                         report.url,
                     )
                 )
+            ]
+
+            detail_reports = [
+                report
+                for report in detail_reports
+                if report.kind in ALLOWED_REPORT_KINDS
             ]
 
             if backfill:
@@ -350,7 +363,7 @@ class LeagueSecretaryScraper:
             save_diagnostics=True,
         )
 
-    def _fetch_and_store_report(
+        def _fetch_and_store_report(
         self,
         report: ReportRecord,
         state: dict[str, dict[str, Any]],
@@ -372,6 +385,19 @@ class LeagueSecretaryScraper:
             report.url,
             save_diagnostics=True,
         )
+
+        rendered_season = self._extract_season_from_html(
+            report_html
+        )
+        rendered_week = self._extract_week_from_html(
+            report_html
+        )
+
+        if rendered_season != "Unknown season":
+            report.season = rendered_season
+
+        if rendered_week != "Unknown week":
+            report.week = rendered_week
 
         content_hash = hashlib.sha256(
             report_html.encode(
@@ -416,7 +442,10 @@ class LeagueSecretaryScraper:
         result["fetched"] += 1
 
         logger.info(
-            "Saved report: %s",
+            "Saved report: kind=%s season=%s week=%s file=%s",
+            report.kind,
+            report.season,
+            report.week,
             destination,
         )
 
@@ -652,137 +681,95 @@ class LeagueSecretaryScraper:
             finally:
                 browser.close()
 
-    def _collect_all_report_pages(
+        def _collect_all_report_pages(
         self,
         frame: Any,
         first_page_html: str,
         url_hash: str,
     ) -> str:
-        """Collect all Kendo grid pages from a rendered report iframe."""
+        """Collect every page of the report grid."""
 
-        # Kendo grids commonly use one of these pager selectors.
-        pager_selectors = (
-            ".k-pager-numbers a",
-            ".k-pager-numbers button",
-            ".k-pager-nav",
-            "[aria-label^='Page']",
-        )
-
-        pager = None
-
-        for selector in pager_selectors:
-            candidate = frame.locator(selector)
-
-            if candidate.count() > 0:
-                pager = candidate
-                logger.info(
-                    "Found report pager: selector=%s controls=%d",
-                    selector,
-                    candidate.count(),
-                )
-                break
-
-        if pager is None:
-            logger.warning(
-                "No pagination controls found in report frame %s",
-                frame.url,
-            )
-            return first_page_html
-
-        page_numbers: list[str] = []
-
-        for index in range(pager.count()):
-            try:
-                control = pager.nth(index)
-                text = control.inner_text().strip()
-
-                if text.isdigit() and text not in page_numbers:
-                    page_numbers.append(text)
-
-            except Exception:
-                continue
-
-        if not page_numbers:
-            logger.warning(
-                "Pager found but no numbered pages detected for %s",
-                frame.url,
-            )
-            return first_page_html
-
-        page_numbers.sort(key=int)
-
-        logger.info(
-            "Report contains %d pages: %s",
-            len(page_numbers),
-            ", ".join(page_numbers),
-        )
-
-        # Capture the first page's rows before navigating.
-        page_fragments: list[str] = [
+        page_fragments = [
             self._extract_table_fragment(frame)
         ]
 
-        for page_number in page_numbers[1:]:
-            try:
-                current_rows = self._get_report_row_count(frame)
+        page_number = 1
 
-                # Locate the numbered pager control by its visible text.
-                page_control = frame.locator(
-                    "a,button"
-                ).filter(
-                    has_text=re.compile(
-                        rf"^{re.escape(page_number)}$"
-                    )
-                ).last
+        while True:
+            next_button = self._find_next_page_control(frame)
 
-                if page_control.count() == 0:
-                    logger.warning(
-                        "Could not find pager control for page %s",
-                        page_number,
-                    )
-                    continue
-
-                page_control.click()
-
-                # Wait until the table changes. A short fallback is included
-                # because the page may reuse the same row elements.
-                try:
-                    frame.wait_for_function(
-                        """
-                        ({selector, oldCount}) => {
-                            const rows = document.querySelectorAll(selector);
-                            return rows.length > 0 &&
-                                   rows.length !== oldCount;
-                        }
-                        """,
-                        {
-                            "selector": (
-                                "tbody tr, "
-                                ".k-grid-content tbody tr"
-                            ),
-                            "oldCount": current_rows,
-                        },
-                        timeout=10_000,
-                    )
-                except PlaywrightTimeoutError:
-                    frame.wait_for_timeout(1_000)
-
-                page_html = self._extract_table_fragment(frame)
-                page_fragments.append(page_html)
-
+            if next_button is None:
                 logger.info(
-                    "Captured report page %s/%s rows=%d",
+                    "No next-page control found after page %d",
                     page_number,
-                    len(page_numbers),
-                    self._get_report_row_count(frame),
                 )
+                break
 
+            if not next_button.is_enabled():
+                logger.info(
+                    "Next-page control disabled after page %d",
+                    page_number,
+                )
+                break
+
+            if (
+                next_button.get_attribute("aria-disabled")
+                == "true"
+            ):
+                logger.info(
+                    "Next-page control aria-disabled after page %d",
+                    page_number,
+                )
+                break
+
+            old_signature = self._table_signature(frame)
+
+            try:
+                next_button.click()
             except Exception as exc:
                 logger.warning(
-                    "Could not capture report page %s: %s",
+                    "Could not click next-page control after page %d: %s",
                     page_number,
                     exc,
                 )
+                break
+
+            try:
+                frame.wait_for_function(
+                    """
+                    ({selector, oldSignature}) => {
+                        const table = document.querySelector(selector);
+                        return table && table.outerHTML !== oldSignature;
+                    }
+                    """,
+                    {
+                        "selector": "table",
+                        "oldSignature": old_signature,
+                    },
+                    timeout=15_000,
+                )
+            except PlaywrightTimeoutError:
+                frame.wait_for_timeout(1_500)
+
+            new_signature = self._table_signature(frame)
+
+            if new_signature == old_signature:
+                logger.warning(
+                    "Next-page click did not change the table after page %d",
+                    page_number,
+                )
+                break
+
+            page_number += 1
+            page_fragments.append(
+                self._extract_table_fragment(frame)
+            )
+
+            logger.info(
+                "Captured report page %d rows=%d",
+                page_number,
+                self._get_report_row_count(frame),
+            )
 
         combined_html = self._combine_table_fragments(
             first_page_html,
@@ -795,6 +782,55 @@ class LeagueSecretaryScraper:
         )
 
         return combined_html
+
+    def _find_next_page_control(self, frame: Any) -> Any | None:
+        """Find the enabled Kendo next-page control."""
+
+        selectors = (
+            ".k-pager-nav[title*='Next']",
+            ".k-pager-nav[aria-label*='Next']",
+            "a[title*='Next']",
+            "button[title*='Next']",
+            "[aria-label*='Go to the next page']",
+            ".k-i-arrow-e",
+            ".k-i-arrow-60-right",
+        )
+
+        for selector in selectors:
+            controls = frame.locator(selector)
+
+            for index in range(controls.count()):
+                control = controls.nth(index)
+
+                if control.is_visible():
+                    return control
+
+        # Fallback: inspect pager controls by accessible name.
+        controls = frame.get_by_role(
+            "button",
+            name=re.compile(
+                r"next|right",
+                re.IGNORECASE,
+            ),
+        )
+
+        for index in range(controls.count()):
+            control = controls.nth(index)
+
+            if control.is_visible():
+                return control
+
+        return None
+
+    def _table_signature(self, frame: Any) -> str:
+        table = frame.locator("table").first
+
+        if table.count() == 0:
+            return ""
+
+        return table.evaluate(
+            "(element) => element.outerHTML"
+        )
 
     def _extract_table_fragment(self, frame: Any) -> str:
         """Return the current report table HTML."""
@@ -1015,35 +1051,111 @@ class LeagueSecretaryScraper:
 
         return "Unknown week"
 
+    def _extract_season_from_html(self, html: str) -> str:
+        """Extract season from rendered report controls."""
+
+        soup = BeautifulSoup(html, "html.parser")
+        text = " ".join(
+            soup.get_text(" ", strip=True).split()
+        )
+
+        match = re.search(
+            r"\b(Fall|Winter|Spring|Summer)\s+(20[2-9]\d)\b",
+            text,
+            re.IGNORECASE,
+        )
+
+        if match:
+            return f"{match.group(1).title()} {match.group(2)}"
+
+        match = re.search(
+            r"\b20[2-9]\d\b",
+            text,
+        )
+
+        if match:
+            return match.group(0)
+
+        return "Unknown season"
+
+    def _extract_week_from_html(self, html: str) -> str:
+        """Extract week from rendered report controls."""
+
+        soup = BeautifulSoup(html, "html.parser")
+        text = " ".join(
+            soup.get_text(" ", strip=True).split()
+        )
+
+        match = re.search(
+            r"\bWeek\s*#?\s*(\d+)\b",
+            text,
+            re.IGNORECASE,
+        )
+
+        if match:
+            return f"Week {match.group(1)}"
+
+        # Report controls may render the value inside an option, for example:
+        # Fall 2026 Week 2 09/17/2026
+        for option in soup.select("option"):
+            option_text = " ".join(
+                option.get_text(" ", strip=True).split()
+            )
+
+            match = re.search(
+                r"\bWeek\s*#?\s*(\d+)\b",
+                option_text,
+                re.IGNORECASE,
+            )
+
+            if match:
+                return f"Week {match.group(1)}"
+
+        return "Unknown week"
+    
     def _infer_kind(
         self,
         title: str,
         url: str,
     ) -> str:
+        """Map discovered URLs and labels to the five published report types."""
+
         text = f"{title} {url}".lower()
 
-        if "/league/standings/" in text:
-            return "standings"
+        if (
+            "/bowler/history/" in text
+            or "bowler list" in text
+            or "bowler history" in text
+        ):
+            return "bowler list"
 
-        if "/league/recaps/" in text:
+        if (
+            "lane assignment" in text
+            or "lane assignments" in text
+            or "/league/schedule/" in text
+            or "schedule" in text
+        ):
+            return "lane assignments"
+
+        if (
+            "/league/recaps/" in text
+            or "recap" in text
+        ):
             return "recap"
 
-        if "/bowler/history/" in text:
-            return "bowler history"
-
-        if "/team/history/" in text:
-            return "team history"
-
-        for keyword in (
-            "statistics",
-            "stats",
-            "results",
-            "schedule",
-            "performance",
-            "history",
+        if (
+            "/league/standings/" in text
+            or "standing" in text
         ):
-            if keyword in text:
-                return keyword
+            return "standings"
+
+        if (
+            "/league/statistics/" in text
+            or "/league/stats/" in text
+            or "statistics" in text
+            or "stats" in text
+        ):
+            return "statistics"
 
         return "report"
 
