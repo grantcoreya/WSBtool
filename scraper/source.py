@@ -372,7 +372,7 @@ class LeagueSecretaryScraper:
 
         return list(seen.values())
 
-    def _fetch_text(self, url: str) -> str:
+        def _fetch_text(self, url: str) -> str:
         response = self.session.get(url, timeout=45)
         response.raise_for_status()
 
@@ -394,20 +394,20 @@ class LeagueSecretaryScraper:
 
         return response.text
 
-        def _is_report_family(self, url: str) -> bool:
-            """Return True for report landing pages such as /standings/122895."""
-            path = urlparse(url).path.rstrip("/").lower()
+    def _is_report_family(self, url: str) -> bool:
+        """Return True for report landing pages such as /standings/122895."""
+        path = urlparse(url).path.rstrip("/").lower()
 
-            family_paths = (
-                f"/league/standings/{LEAGUE_ID}",
-                f"/league/recaps/{LEAGUE_ID}",
-                f"/league/results/{LEAGUE_ID}",
-                f"/league/schedule/{LEAGUE_ID}",
-                f"/league/statistics/{LEAGUE_ID}",
-                f"/league/stats/{LEAGUE_ID}",
-            )   
+        family_paths = (
+            f"/league/standings/{LEAGUE_ID}",
+            f"/league/recaps/{LEAGUE_ID}",
+            f"/league/results/{LEAGUE_ID}",
+            f"/league/schedule/{LEAGUE_ID}",
+            f"/league/statistics/{LEAGUE_ID}",
+            f"/league/stats/{LEAGUE_ID}",
+        )
 
-    return path in family_paths
+        return path in family_paths
 
     def _is_subscription_pdf(self, url: str) -> bool:
         lower = url.lower()
