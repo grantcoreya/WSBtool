@@ -1163,7 +1163,9 @@ class LeagueSecretaryScraper:
         self,
         reports: list[ReportRecord],
     ) -> list[ReportRecord]:
-        return sorted(
+        selected: dict[str, ReportRecord] = {}
+
+        ordered = sorted(
             reports,
             key=lambda report: (
                 self._season_sort_key(report.season),
@@ -1171,7 +1173,13 @@ class LeagueSecretaryScraper:
                 report.url,
             ),
             reverse=True,
-        )[:20]
+        )
+
+        for report in ordered:
+            if report.kind not in selected:
+                selected[report.kind] = report
+
+        return list(selected.values())
 
     def _season_sort_key(
         self,
