@@ -610,7 +610,7 @@ class LeagueSecretaryScraper:
                     len(outer_html.encode("utf-8")),
                 )
 
-                                if candidates:
+                if candidates:
                     best_score, best_url, best_html = max(
                         candidates,
                         key=lambda item: item[0],
@@ -646,7 +646,6 @@ class LeagueSecretaryScraper:
                     )
 
                     return best_html
-
 
                 return outer_html
 
@@ -896,7 +895,7 @@ class LeagueSecretaryScraper:
                 element.decompose()
 
         return str(document)
-    
+
     def _contains_detailed_report_link(self, html: str) -> bool:
         soup = BeautifulSoup(html, "html.parser")
 
