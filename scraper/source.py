@@ -373,39 +373,39 @@ class LeagueSecretaryScraper:
         return list(seen.values())
 
         def _fetch_text(self, url: str) -> str:
-        response = self.session.get(url, timeout=45)
-        response.raise_for_status()
+            response = self.session.get(url, timeout=45)
+            response.raise_for_status()
 
-        content_type = response.headers.get(
-            "content-type",
-            "",
-        ).lower()
+            content_type = response.headers.get(
+                "content-type",
+                "",
+            ).lower()
 
-        path = urlparse(url).path.lower()
+            path = urlparse(url).path.lower()
 
-        if (
-            "html" not in content_type
-            and not path.endswith(("/", ".html"))
-        ):
-            raise ValueError(
-                "Expected HTML but received "
-                f"{content_type or 'unknown content type'}"
+            if (
+                "html" not in content_type
+                and not path.endswith(("/", ".html"))
+            ):
+                raise ValueError(
+                    "Expected HTML but received "
+                    f"{content_type or 'unknown content type'}"
+                )
+
+            return response.text
+
+        def _is_report_family(self, url: str) -> bool:
+            """Return True for report landing pages such as /standings/122895."""
+            path = urlparse(url).path.rstrip("/").lower()
+
+            family_paths = (
+                f"/league/standings/{LEAGUE_ID}",
+                f"/league/recaps/{LEAGUE_ID}",
+                f"/league/results/{LEAGUE_ID}",
+                f"/league/schedule/{LEAGUE_ID}",
+                f"/league/statistics/{LEAGUE_ID}",
+                f"/league/stats/{LEAGUE_ID}",
             )
-
-        return response.text
-
-    def _is_report_family(self, url: str) -> bool:
-        """Return True for report landing pages such as /standings/122895."""
-        path = urlparse(url).path.rstrip("/").lower()
-
-        family_paths = (
-            f"/league/standings/{LEAGUE_ID}",
-            f"/league/recaps/{LEAGUE_ID}",
-            f"/league/results/{LEAGUE_ID}",
-            f"/league/schedule/{LEAGUE_ID}",
-            f"/league/statistics/{LEAGUE_ID}",
-            f"/league/stats/{LEAGUE_ID}",
-        )
 
         return path in family_paths
 
