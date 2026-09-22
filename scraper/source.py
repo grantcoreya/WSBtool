@@ -682,18 +682,17 @@ class LeagueSecretaryScraper:
             finally:
                 browser.close()
 
-    def _collect_all_report_pages(
+        def _collect_all_report_pages(
         self,
         frame: Any,
         first_page_html: str,
         url_hash: str,
     ) -> str:
-        """Collect every page of the report grid."""
+        """Collect every page of a paginated Kendo report grid."""
 
         page_fragments = [
             self._extract_table_fragment(frame)
         ]
-
         page_number = 1
 
         while True:
@@ -701,24 +700,7 @@ class LeagueSecretaryScraper:
 
             if next_button is None:
                 logger.info(
-                    "No next-page control found after page %d",
-                    page_number,
-                )
-                break
-
-            if not next_button.is_enabled():
-                logger.info(
-                    "Next-page control disabled after page %d",
-                    page_number,
-                )
-                break
-
-            if (
-                next_button.get_attribute("aria-disabled")
-                == "true"
-            ):
-                logger.info(
-                    "Next-page control aria-disabled after page %d",
+                    "No enabled next-page control found after page %d",
                     page_number,
                 )
                 break
@@ -739,29 +721,48 @@ class LeagueSecretaryScraper:
                 frame.wait_for_function(
                     """
                     ({selector, oldSignature}) => {
-                        const table = document.querySelector(selector);
-                        return table && table.outerHTML !== oldSignature;
+                        const rows = [
+                            ...document.querySelectorAll(selector)
+                        ];
+
+                        const signature = rows
+                            .map((row) => row.innerText)
+                            .join("\\n");
+
+                        return signature.length > 0 &&
+                               signature !== oldSignature;
                     }
                     """,
                     {
-                        "selector": "table",
+                        "selector": (
+                            ".k-grid-content tbody tr, "
+                            "tbody tr"
+                        ),
                         "oldSignature": old_signature,
                     },
                     timeout=15_000,
                 )
             except PlaywrightTimeoutError:
-                frame.wait_for_timeout(1_500)
+                frame.wait_for_timeout(2_000)
 
             new_signature = self._table_signature(frame)
 
+            if not new_signature:
+                logger.warning(
+                    "No rows found after clicking next page %d",
+                    page_number + 1,
+                )
+                break
+
             if new_signature == old_signature:
                 logger.warning(
-                    "Next-page click did not change the table after page %d",
+                    "Next-page click did not change the grid after page %d",
                     page_number,
                 )
                 break
 
             page_number += 1
+
             page_fragments.append(
                 self._extract_table_fragment(frame)
             )
@@ -782,19 +783,24 @@ class LeagueSecretaryScraper:
             combined_html,
         )
 
+        logger.info(
+            "Combined %d report pages into %s",
+            page_number,
+            f"{url_hash}-all-pages.html",
+        )
+
         return combined_html
 
     def _find_next_page_control(self, frame: Any) -> Any | None:
-        """Find the enabled Kendo next-page control."""
+        """Return the clickable, enabled Kendo next-page link."""
 
         selectors = (
-            ".k-pager-nav[title*='Next']",
-            ".k-pager-nav[aria-label*='Next']",
-            "a[title*='Next']",
-            "button[title*='Next']",
-            "[aria-label*='Go to the next page']",
-            ".k-i-arrow-e",
-            ".k-i-arrow-60-right",
+            "a.k-pager-nav[aria-label*='next' i]",
+            "a.k-pager-nav[title*='next' i]",
+            "a[aria-label*='next page' i]",
+            "a[title*='next page' i]",
+            "li.k-pager-next a",
+            ".k-pager-wrap a.k-pager-nav",
         )
 
         for selector in selectors:
@@ -803,47 +809,155 @@ class LeagueSecretaryScraper:
             for index in range(controls.count()):
                 control = controls.nth(index)
 
-                if control.is_visible():
-                    return control
+                if not control.is_visible():
+                    continue
 
-        # Fallback: inspect pager controls by accessible name.
-        controls = frame.get_by_role(
-            "button",
-            name=re.compile(
-                r"next|right",
-                re.IGNORECASE,
-            ),
+                aria_disabled = control.get_attribute(
+                    "aria-disabled"
+                )
+                class_name = (
+                    control.get_attribute("class")
+                    or ""
+                ).lower()
+
+                if aria_disabled == "true":
+                    continue
+
+                if "disabled" in class_name:
+                    continue
+
+                if not control.is_enabled():
+                    continue
+
+                logger.info(
+                    "Using next-page control: selector=%s title=%s "
+                    "aria-label=%s class=%s",
+                    selector,
+                    control.get_attribute("title"),
+                    control.get_attribute("aria-label"),
+                    class_name,
+                )
+
+                return control
+
+        # Some Kendo versions put the label on the parent <li> and the
+        # arrow icon on a nested <span>. Select the parent link, not the icon.
+        icon_selectors = (
+            "span.k-i-arrow-e",
+            "span.k-i-arrow-60-right",
+            "span.k-i-arrowhead-e",
         )
 
-        for index in range(controls.count()):
-            control = controls.nth(index)
+        for selector in icon_selectors:
+            icons = frame.locator(selector)
 
-            if control.is_visible():
-                return control
+            for index in range(icons.count()):
+                icon = icons.nth(index)
+                parent_link = icon.locator("xpath=ancestor::a[1]")
+
+                if parent_link.count() == 0:
+                    continue
+
+                if not parent_link.is_visible():
+                    continue
+
+                aria_disabled = parent_link.get_attribute(
+                    "aria-disabled"
+                )
+                class_name = (
+                    parent_link.get_attribute("class")
+                    or ""
+                ).lower()
+
+                if aria_disabled == "true":
+                    continue
+
+                if "disabled" in class_name:
+                    continue
+
+                if not parent_link.is_enabled():
+                    continue
+
+                logger.info(
+                    "Using parent link for next-page icon: %s",
+                    selector,
+                )
+
+                return parent_link
+
+        logger.info(
+            "Pager diagnostics: pager=%d next_links=%d "
+            "arrow_icons=%d",
+            frame.locator(
+                ".k-pager, .k-pager-wrap"
+            ).count(),
+            frame.locator(
+                "a[aria-label*='next' i], "
+                "a[title*='next' i]"
+            ).count(),
+            frame.locator(
+                ".k-i-arrow-e, "
+                ".k-i-arrow-60-right, "
+                ".k-i-arrowhead-e"
+            ).count(),
+        )
 
         return None
 
     def _table_signature(self, frame: Any) -> str:
-        table = frame.locator("table").first
+        """Return only the current data-row text as a page signature."""
 
-        if table.count() == 0:
-            return ""
-
-        return table.evaluate(
-            "(element) => element.outerHTML"
+        selectors = (
+            ".k-grid-content tbody tr",
+            "tbody tr",
         )
+
+        for selector in selectors:
+            rows = frame.locator(selector)
+
+            if rows.count() == 0:
+                continue
+
+            texts: list[str] = []
+
+            for index in range(rows.count()):
+                text = rows.nth(index).inner_text().strip()
+                texts.append(text)
+
+            return "\n".join(texts)
+
+        return ""
 
     def _extract_table_fragment(self, frame: Any) -> str:
-        """Return the current report table HTML."""
+        """Return the report data table HTML."""
 
-        table = frame.locator("table").first
-
-        if table.count() == 0:
-            return ""
-
-        return table.evaluate(
-            "(element) => element.outerHTML"
+        selectors = (
+            ".k-grid table",
+            "table.k-grid-table",
+            ".k-grid-content table",
+            "table",
         )
+
+        for selector in selectors:
+            tables = frame.locator(selector)
+
+            if tables.count() == 0:
+                continue
+
+            for index in range(tables.count()):
+                table = tables.nth(index)
+
+                if table.locator("tbody tr").count() > 0:
+                    return table.evaluate(
+                        "(element) => element.outerHTML"
+                    )
+
+        logger.warning(
+            "Could not find a data table in frame %s",
+            frame.url,
+        )
+
+        return ""
 
     def _get_report_row_count(self, frame: Any) -> int:
         """Count currently visible data rows."""
