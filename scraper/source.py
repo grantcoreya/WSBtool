@@ -17,57 +17,62 @@ from scraper.models import ReportRecord
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://www.leaguesecretary.com/bowling-centers/c/bowling-leagues/l/dashboard/122895"
+BASE_URL = (
+    "https://www.leaguesecretary.com/"
+    "bowling-centers/west-seattle-bowl/"
+    "bowling-leagues/rainbowlers-league-c21/"
+    "dashboard/122895"
+)
+
 ALLOWED_HOST = "www.leaguesecretary.com"
+LEAGUE_ID = "122895"
 
-# These patterns allow the scraper to recognize modern league naming conventions,
-# including season labels like "Fall 2026", "2026-2027", and similar variants.
-SEASON_PATTERNS = [
-    re.compile(r"20[2-9]\d(?:[-/ ]20[2-9]\d)?", re.IGNORECASE),
-    re.compile(r"(?:Fall|Winter|Spring|Summer)\s+20[2-9]\d", re.IGNORECASE),
-    re.compile(r"20[2-9]\d[-/ ]?Season", re.IGNORECASE),
-]
+# These are public HTML report families. PDF/shared-report URLs are intentionally
+# excluded because the league's PDF reports require a subscription.
+REPORT_PATH_MARKERS = (
+    "/league/standings/",
+    "/league/recaps/",
+    "/league/results/",
+    "/league/schedule/",
+    "/league/statistics/",
+    "/league/stats/",
+    "/bowler/history/",
+    "/team/history/",
+)
 
-WEEK_PATTERNS = [
-    re.compile(r"\bweek\s*#?\d+\b", re.IGNORECASE),
-    re.compile(r"\bweek\s*\d+\b", re.IGNORECASE),
-    re.compile(r"\b(?:round|match|game)\s*#?\d+\b", re.IGNORECASE),
-]
-
-# Report-like words to keep only strong, real report candidates and exclude
-# generic navigation, help, or marketing links.
 REPORT_KEYWORDS = (
     "standings",
     "recap",
     "stats",
     "statistics",
     "results",
-    "documents",
     "schedule",
     "performance",
     "bowler",
     "team",
-    "lane",
-    "graph",
+    "history",
     "average",
-    "top",
-    "league",
-    "dashboard",
+)
+
+SEASON_PATTERNS = (
+    # League Secretary uses URLs such as /122895/2026/f/2.
+    re.compile(r"\b20[2-9]\d\b", re.IGNORECASE),
+    re.compile(r"20[2-9]\d[-/]20[2-9]\d", re.IGNORECASE),
+    re.compile(r"(?:Fall|Winter|Spring|Summer)\s+20[2-9]\d", re.IGNORECASE),
+)
+
+WEEK_PATTERNS = (
+    re.compile(r"\bweek\s*#?\d+\b", re.IGNORECASE),
+    re.compile(r"\b(?:round|match|game)\s*#?\d+\b", re.IGNORECASE),
 )
 
 
 class LeagueSecretaryScraper:
-    """
-    Conservative public scraper for Rainbowlers League pages.
+    """Collect public Rainbowlers League HTML reports.
 
-    The goal is to collect public League Secretary reports in a way that is
-    stable, easily debuggable, and friendly to a weekly automation run.
-
-    Design goals:
-    - fetch public HTML without login
-    - save raw HTML files for inspection/debugging
-    - store an index of known reports to avoid re-downloading unchanged content
-    - keep a very conservative allowlist for report-like pages
+    The dashboard contains links to report families such as standings and
+    recaps. Those family pages contain more specific season/week links. This
+    scraper follows that two-level structure without requiring a browser.
     """
 
     def __init__(
@@ -80,23 +85,25 @@ class LeagueSecretaryScraper:
         self.raw_dir = self.output_dir / "raw"
         self.index_path = self.output_dir / "index.json"
         self.dashboard_url = dashboard_url
-        self.user_agent = user_agent
 
         self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": self.user_agent,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-        })
+        self.session.headers.update(
+            {
+                "User-Agent": user_agent,
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;"
+                    "q=0.9,*/*;q=0.8"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+        )
 
     def run(self, backfill: bool = False) -> dict[str, Any]:
-        """
-        Fetch the public dashboard and any report links that look legitimate.
+        """Discover and fetch public HTML reports.
 
-        Args:
-            backfill:
-                If True, fetch all supported report URLs. If False, fetch only
-                the newest records from the current season/week selection.
+        ``backfill=True`` fetches all discovered report URLs. A normal run
+        fetches the newest 20 report candidates, which keeps the weekly job
+        small while still allowing changed reports to be refreshed.
         """
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
@@ -106,251 +113,513 @@ class LeagueSecretaryScraper:
             "fetched": 0,
             "skipped": 0,
             "errors": [],
+            "discovered": 0,
             "records": 0,
         }
 
         try:
             dashboard_html = self._fetch_text(self.dashboard_url)
+
+            logger.info(
+                "Fetched dashboard: url=%s html_bytes=%d",
+                self.dashboard_url,
+                len(dashboard_html.encode("utf-8")),
+            )
+
+            # Save this snapshot even when no report links are found. It is the
+            # most useful artifact for debugging future site-layout changes.
+            (self.raw_dir / "dashboard.html").write_text(
+                dashboard_html,
+                encoding="utf-8",
+            )
+
             reports = self.discover_reports(dashboard_html)
 
-            # Keep only seasons that look current enough for your workflow.
-            reports = [report for report in reports if self._is_supported_season(report.season, report.url)]
-            reports = sorted(reports, key=lambda item: (self._season_sort_key(item.season), self._week_sort_key(item.week), item.url))
+            logger.info(
+                "Discovered %d report links on dashboard",
+                len(reports),
+            )
+
+            # Report-family pages such as /league/standings/122895 often contain
+            # season/week URLs. Follow each family page one level deeper.
+            family_reports = [
+                report
+                for report in reports
+                if self._is_report_family(report.url)
+            ]
+
+            for family_report in family_reports:
+                try:
+                    family_html = self._fetch_text(family_report.url)
+                    detailed_reports = self.discover_reports(
+                        family_html,
+                        base_url=family_report.url,
+                    )
+                    reports.extend(detailed_reports)
+
+                    logger.info(
+                        "Discovered %d links from %s",
+                        len(detailed_reports),
+                        family_report.url,
+                    )
+                except Exception as exc:
+                    result["errors"].append(
+                        {
+                            "url": family_report.url,
+                            "error": str(exc),
+                        }
+                    )
+                    logger.warning(
+                        "Could not inspect report family %s: %s",
+                        family_report.url,
+                        exc,
+                    )
+
+            reports = self._deduplicate_reports(reports)
+            result["discovered"] = len(reports)
+
+            # Keep dashboard/family pages for diagnostics, plus supported
+            # season-specific reports. Unknown-season family pages are retained.
+            reports = [
+                report
+                for report in reports
+                if (
+                    report.season == "Unknown season"
+                    or self._is_supported_season(
+                        report.season,
+                        report.url,
+                    )
+                )
+            ]
 
             if backfill:
                 selected_reports = reports
             else:
-                selected_reports = self._select_latest_relevant_reports(reports)
+                selected_reports = self._select_latest_relevant_reports(
+                    reports
+                )
+
+            logger.info(
+                "Fetching %d selected reports from %d filtered reports",
+                len(selected_reports),
+                len(reports),
+            )
 
             for report in selected_reports:
                 try:
-                    report_html = self._fetch_text(report.url)
-                    content_hash = hashlib.sha256(report_html.encode("utf-8", errors="replace")).hexdigest()
-                    record_key = self._record_key(report)
+                    if self._is_subscription_pdf(report.url):
+                        logger.info(
+                            "Skipping subscription-protected PDF: %s",
+                            report.url,
+                        )
+                        continue
 
-                    if record_key in state and state[record_key].get("sha256") == content_hash:
+                    report_html = self._fetch_text(report.url)
+
+                    content_hash = hashlib.sha256(
+                        report_html.encode(
+                            "utf-8",
+                            errors="replace",
+                        )
+                    ).hexdigest()
+
+                    key = self._record_key(report)
+
+                    if (
+                        key in state
+                        and state[key].get("sha256") == content_hash
+                    ):
                         result["skipped"] += 1
                         continue
 
-                    filename = f"{hashlib.sha256(report.url.encode('utf-8')).hexdigest()[:20]}.html"
-                    destination = self.raw_dir / filename
-                    destination.write_text(report_html, encoding="utf-8")
+                    filename = (
+                        f"{hashlib.sha256(report.url.encode('utf-8'))"
+                        ".hexdigest()[:20]}.html"
+                    )
 
-                    record = ReportRecord(
+                    destination = self.raw_dir / filename
+                    destination.write_text(
+                        report_html,
+                        encoding="utf-8",
+                    )
+
+                    saved = ReportRecord(
                         url=report.url,
                         title=report.title,
                         season=report.season,
                         week=report.week,
                         kind=report.kind,
                         sha256=content_hash,
-                        raw_file=str(destination.relative_to(self.output_dir)),
-                        fetched_at=datetime.now(timezone.utc).isoformat(),
+                        raw_file=str(
+                            destination.relative_to(self.output_dir)
+                        ),
+                        fetched_at=datetime.now(
+                            timezone.utc
+                        ).isoformat(),
                         source="League Secretary",
                     )
 
-                    state[record_key] = record.to_dict()
+                    state[key] = saved.to_dict()
                     result["fetched"] += 1
 
-                except Exception as exc:  # Continue even if one URL fails.
-                    result["errors"].append({"url": report.url, "error": str(exc)})
-                    logger.warning("Failed to fetch report %s: %s", report.url, exc)
+                except Exception as exc:
+                    result["errors"].append(
+                        {
+                            "url": report.url,
+                            "error": str(exc),
+                        }
+                    )
+                    logger.warning(
+                        "Failed to fetch report %s: %s",
+                        report.url,
+                        exc,
+                    )
 
             self._save_index(state)
             result["records"] = len(state)
             return result
 
         except Exception as exc:
-            result["errors"].append({"url": self.dashboard_url, "error": str(exc)})
-            logger.exception("Dashboard fetch failed.")
+            result["errors"].append(
+                {
+                    "url": self.dashboard_url,
+                    "error": str(exc),
+                }
+            )
+            logger.exception("Dashboard fetch failed")
             self._save_index(state)
             return result
 
-    def discover_reports(self, html: str) -> list[ReportRecord]:
-        """
-        Walk the dashboard HTML and collect candidate report links.
-
-        We intentionally keep the filter narrow so the scraper does not pull in
-        unrelated links from the site navigation, newsletters, or marketing pages.
-        """
+    def discover_reports(
+        self,
+        html: str,
+        base_url: str | None = None,
+    ) -> list[ReportRecord]:
+        """Find same-host public report links in an HTML document."""
+        source_url = base_url or self.dashboard_url
         soup = BeautifulSoup(html, "html.parser")
         seen: dict[str, ReportRecord] = OrderedDict()
 
         for tag in soup.select("a[href]"):
             href = tag.get("href", "").strip()
-            if not href or href.startswith("javascript:"):
+
+            if not href:
                 continue
 
-            target = urljoin(self.dashboard_url, href).split("#", 1)[0]
+            if href.startswith(("javascript:", "mailto:", "tel:")):
+                continue
+
+            target = urljoin(source_url, href).split("#", 1)[0]
             parsed = urlparse(target)
+            host = parsed.netloc.lower()
 
-            if parsed.netloc and parsed.netloc.lower() != ALLOWED_HOST:
+            if host and host != ALLOWED_HOST:
                 continue
 
-            text = " ".join(tag.get_text(" ", strip=True).split())
+            if self._is_subscription_pdf(target):
+                logger.debug(
+                    "Ignoring subscription-protected PDF: %s",
+                    target,
+                )
+                continue
+
+            if LEAGUE_ID not in parsed.path and target != self.dashboard_url:
+                continue
+
+            text = " ".join(
+                tag.get_text(" ", strip=True).split()
+            )
+
             combined = f"{text} {target}".lower()
+            path = parsed.path.lower()
 
-            if not self._looks_like_report(text, target, combined):
+            # This is the important path-marker check. It catches links whose
+            # visible text is only "Interactive", while the URL contains
+            # "/league/standings/" or another report-family marker.
+            is_report_path = any(
+                marker in path
+                for marker in REPORT_PATH_MARKERS
+            )
+
+            has_report_keyword = any(
+                keyword in combined
+                for keyword in REPORT_KEYWORDS
+            )
+
+            is_dashboard = (
+                target.rstrip("/")
+                == self.dashboard_url.rstrip("/")
+            )
+
+            if (
+                not is_report_path
+                and not has_report_keyword
+                and not is_dashboard
+            ):
                 continue
 
-            record = ReportRecord(
+            report = ReportRecord(
                 url=target,
-                title=(text or "League Secretary report")[:200],
+                title=(
+                    text or self._title_from_path(path)
+                )[:200],
                 season=self._extract_season(text, target),
                 week=self._extract_week(text, target),
                 kind=self._infer_kind(text, target),
             )
 
-            if not self._is_supported_season(record.season, record.url):
-                continue
-
-            seen[target.lower()] = record
-
-        dashboard_record = ReportRecord(
-            url=self.dashboard_url,
-            title="Rainbowlers League Dashboard",
-            season="Unknown season",
-            week="Unknown week",
-            kind="dashboard",
-        )
-        seen.setdefault(self.dashboard_url.lower(), dashboard_record)
+            seen[target.lower()] = report
 
         return list(seen.values())
-
-    def _looks_like_report(self, text: str, url: str, combined: str) -> bool:
-        """Return True when a URL is likely to be a report page instead of a menu item."""
-        if not text and "/reports/" not in url.lower():
-            return False
-
-        lower_text = text.lower()
-        if any(keyword in lower_text for keyword in REPORT_KEYWORDS):
-            return True
-
-        if any(keyword in url.lower() for keyword in ("reports", "standings", "stats", "results", "recap", "schedule")):
-            return True
-
-        if any(keyword in combined for keyword in ("statistics", "standings", "results", "recap", "weekly")):
-            return True
-
-        return False
 
     def _fetch_text(self, url: str) -> str:
         response = self.session.get(url, timeout=45)
         response.raise_for_status()
+
+        content_type = response.headers.get(
+            "content-type",
+            "",
+        ).lower()
+
+        path = urlparse(url).path.lower()
+
+        if (
+            "html" not in content_type
+            and not path.endswith(("/", ".html"))
+        ):
+            raise ValueError(
+                "Expected HTML but received "
+                f"{content_type or 'unknown content type'}"
+            )
+
         return response.text
+
+    def _is_report_family(self, url: str) -> bool:
+        path = urlparse(url).path.rstrip("/").lower()
+
+        return any(
+            path.endswith(marker.rstrip("/"))
+            for marker in REPORT_PATH_MARKERS
+        )
+
+    def _is_subscription_pdf(self, url: str) -> bool:
+        lower = url.lower()
+
+        return (
+            lower.endswith(".pdf")
+            or "/reports/shared" in lower
+        )
+
+    def _title_from_path(self, path: str) -> str:
+        value = (
+            path.rstrip("/")
+            .split("/")[-1]
+            .replace("-", " ")
+        )
+
+        return value.title() or "League Secretary report"
+
+    def _deduplicate_reports(
+        self,
+        reports: list[ReportRecord],
+    ) -> list[ReportRecord]:
+        unique: dict[str, ReportRecord] = OrderedDict()
+
+        for report in reports:
+            unique[report.url.lower()] = report
+
+        return list(unique.values())
 
     def _load_index(self) -> dict[str, dict[str, Any]]:
         if not self.index_path.exists():
             return {}
 
         try:
-            payload = json.loads(self.index_path.read_text(encoding="utf-8"))
-            return payload.get("records", {})
-        except json.JSONDecodeError:
-            logger.warning("index.json exists but could not be parsed; starting fresh")
+            payload = json.loads(
+                self.index_path.read_text(
+                    encoding="utf-8",
+                )
+            )
+
+            records = payload.get("records", {})
+
+            return records if isinstance(records, dict) else {}
+
+        except (json.JSONDecodeError, OSError):
+            logger.warning(
+                "Could not read %s; starting with an empty index",
+                self.index_path,
+            )
             return {}
 
-    def _save_index(self, state: dict[str, dict[str, Any]]) -> None:
+    def _save_index(
+        self,
+        state: dict[str, dict[str, Any]],
+    ) -> None:
         payload = {
             "league": "Rainbowlers League",
             "records": state,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(
+                timezone.utc
+            ).isoformat(),
         }
-        self.index_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
-    def _record_key(self, record: ReportRecord) -> str:
-        return f"{record.season}|{record.week}|{record.url}".lower()
+        self.index_path.write_text(
+            json.dumps(
+                payload,
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
 
-    def _extract_season(self, title: str, url: str) -> str:
+    def _record_key(
+        self,
+        report: ReportRecord,
+    ) -> str:
+        return (
+            f"{report.season}|"
+            f"{report.week}|"
+            f"{report.url}"
+        ).lower()
+
+    def _extract_season(
+        self,
+        title: str,
+        url: str,
+    ) -> str:
         text = f"{title} {url}"
+
         for pattern in SEASON_PATTERNS:
             match = pattern.search(text)
+
             if match:
                 return match.group(0)
+
         return "Unknown season"
 
-    def _extract_week(self, title: str, url: str) -> str:
+    def _extract_week(
+        self,
+        title: str,
+        url: str,
+    ) -> str:
         text = f"{title} {url}"
+
         for pattern in WEEK_PATTERNS:
             match = pattern.search(text)
+
             if match:
                 return match.group(0)
+
+        # For URLs like /2026/f/2, expose the final numeric component as
+        # a report period, but do not treat bowler IDs as week numbers.
+        path_parts = [
+            part
+            for part in urlparse(url).path.split("/")
+            if part
+        ]
+
+        if (
+            "bowler" not in url.lower()
+            and path_parts
+            and path_parts[-1].isdigit()
+        ):
+            return f"Report {path_parts[-1]}"
+
         return "Unknown week"
 
-    def _infer_kind(self, title: str, url: str) -> str:
+    def _infer_kind(
+        self,
+        title: str,
+        url: str,
+    ) -> str:
         text = f"{title} {url}".lower()
+
         for keyword in (
             "standings",
-            "stats",
-            "statistics",
-            "result",
             "recap",
+            "statistics",
+            "stats",
+            "results",
             "schedule",
-            "performance",
             "bowler",
             "team",
-            "graph",
-            "average",
+            "performance",
+            "history",
         ):
             if keyword in text:
                 return keyword
+
         return "report"
 
-    def _is_supported_season(self, season: str, url: str) -> bool:
-        """
-        Accept only seasons aligned with your app’s current requirement.
-
-        For example, this keeps the workflow focused on 2026-2027 and later,
-        while still tolerating older-season links that might be referenced in the
-        dashboard metadata.
-        """
+    def _is_supported_season(
+        self,
+        season: str,
+        url: str,
+    ) -> bool:
         text = f"{season} {url}"
-        year_matches = re.findall(r"20([2-9]\d)", text)
-        if not year_matches:
-            return False
+        years = re.findall(r"20([2-9]\d)", text)
 
-        for year in year_matches:
-            try:
-                if int(year) >= 26:
-                    return True
-            except ValueError:
-                continue
-
-        return False
-
-    def _select_latest_relevant_reports(self, reports: list[ReportRecord]) -> list[ReportRecord]:
-        """Keep a small, deterministic set for a normal weekly run."""
-        if not reports:
-            return []
-
-        sorted_reports = sorted(
-            reports,
-            key=lambda item: (
-                self._season_sort_key(item.season),
-                self._week_sort_key(item.week),
-                item.url,
-            ),
-            reverse=True,
+        return any(
+            int(year) >= 26
+            for year in years
         )
 
-        return sorted_reports[:20]
+    def _select_latest_relevant_reports(
+        self,
+        reports: list[ReportRecord],
+    ) -> list[ReportRecord]:
+        return sorted(
+            reports,
+            key=lambda report: (
+                self._season_sort_key(report.season),
+                self._week_sort_key(report.week),
+                report.url,
+            ),
+            reverse=True,
+        )[:20]
 
-    def _season_sort_key(self, season: str) -> tuple[int, str]:
-        match = re.search(r"20([2-9]\d)", season)
-        year = int(match.group(1)) if match else 0
-        return (year, season)
+    def _season_sort_key(
+        self,
+        season: str,
+    ) -> tuple[int, str]:
+        match = re.search(
+            r"20([2-9]\d)",
+            season,
+        )
 
-    def _week_sort_key(self, week: str) -> int:
-        match = re.search(r"(?:week\s*)?(\d+)", week, flags=re.IGNORECASE)
-        if not match:
-            return 0
-        try:
-            return int(match.group(1))
-        except ValueError:
-            return 0
+        return (
+            int(match.group(1))
+            if match
+            else 0,
+            season,
+        )
+
+    def _week_sort_key(
+        self,
+        week: str,
+    ) -> int:
+        match = re.search(
+            r"(?:week|report)\s*(\d+)",
+            week,
+            re.IGNORECASE,
+        )
+
+        return int(match.group(1)) if match else 0
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s: %(message)s",
+    )
+
     scraper = LeagueSecretaryScraper(output_dir="data")
-    result = scraper.run(backfill=False)
-    print(json.dumps(result, indent=2, sort_keys=True))
+
+    print(
+        json.dumps(
+            scraper.run(backfill=False),
+            indent=2,
+            sort_keys=True,
+        )
+    )
