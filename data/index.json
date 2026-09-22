@@ -1,0 +1,61 @@
+{
+  "league": "Rainbowlers League",
+  "records": {
+    "fall 2026|unknown week|https://www.leaguesecretary.com/bowling-centers/west-seattle-bowl/bowling-leagues/rainbowlers-league/league/schedule-png/122895": {
+      "fetched_at": "2026-09-22T23:44:19.826813+00:00",
+      "kind": "lane assignments",
+      "raw_file": "raw/d9ddf384bd5c8fcc0145.html",
+      "season": "Fall 2026",
+      "sha256": "6027b466f5744596dfe4d6491743fdcff417f12711d5247b188cd056e6bcca35",
+      "source": "League Secretary",
+      "title": "Season schedule View the complete published schedule for the current season.",
+      "url": "https://www.leaguesecretary.com/bowling-centers/west-seattle-bowl/bowling-leagues/rainbowlers-league/league/schedule-png/122895",
+      "week": "Unknown week"
+    },
+    "fall 2026|week 2|https://www.leaguesecretary.com/bowling-centers/west-seattle-bowl/bowling-leagues/rainbowlers-league/bowler/list/122895": {
+      "fetched_at": "2026-09-22T23:45:04.075287+00:00",
+      "kind": "bowler list",
+      "raw_file": "raw/699d0425469d788148aa.html",
+      "season": "Fall 2026",
+      "sha256": "f1f117fd97b27a85c5308686036a76bdb4f4c9b8a45d836c845baee110b11c13",
+      "source": "League Secretary",
+      "title": "Bowler list Browse all league bowlers, averages, and season achievements.",
+      "url": "https://www.leaguesecretary.com/bowling-centers/west-seattle-bowl/bowling-leagues/rainbowlers-league/bowler/list/122895",
+      "week": "Week 2"
+    },
+    "fall 2026|week 2|https://www.leaguesecretary.com/bowling-centers/west-seattle-bowl/bowling-leagues/rainbowlers-league/league/recaps/122895": {
+      "fetched_at": "2026-09-22T23:44:25.853302+00:00",
+      "kind": "recap",
+      "raw_file": "raw/a03304bc2e8234de47e6.html",
+      "season": "Fall 2026",
+      "sha256": "5e199aed7c0a05827878e92f64f67cc8f2a2c9f42f1087187cb1587c75063a8d",
+      "source": "League Secretary",
+      "title": "Interactive recaps Explore weekly recap results with bowler-level drill-downs.",
+      "url": "https://www.leaguesecretary.com/bowling-centers/west-seattle-bowl/bowling-leagues/rainbowlers-league/league/recaps/122895",
+      "week": "Week 2"
+    },
+    "fall 2026|week 2|https://www.leaguesecretary.com/bowling-centers/west-seattle-bowl/bowling-leagues/rainbowlers-league/league/standings/122895": {
+      "fetched_at": "2026-09-22T23:43:40.496892+00:00",
+      "kind": "standings",
+      "raw_file": "raw/418eb13220d177a8963b.html",
+      "season": "Fall 2026",
+      "sha256": "8b11e7015529b45d4f03cf2cfae92df78b29bf8421c3026e449040b026ec58ba",
+      "source": "League Secretary",
+      "title": "Interactive standings Review current standings and open detailed team information.",
+      "url": "https://www.leaguesecretary.com/bowling-centers/west-seattle-bowl/bowling-leagues/rainbowlers-league/league/standings/122895",
+      "week": "Week 2"
+    },
+    "fall 2026|week 2|https://www.leaguesecretary.com/bowling-centers/west-seattle-bowl/bowling-leagues/rainbowlers-league/league/statistics-png/122895": {
+      "fetched_at": "2026-09-22T23:42:59.805491+00:00",
+      "kind": "statistics",
+      "raw_file": "raw/33e1bdb2ff5fbfb60f31.html",
+      "season": "Fall 2026",
+      "sha256": "da1683eff2ed869ae7432a22401663facfbb1a411f42fcd5db4c9fd0c87fa309",
+      "source": "League Secretary",
+      "title": "Weekly statistics View detailed statistics for each reported week of the season.",
+      "url": "https://www.leaguesecretary.com/bowling-centers/west-seattle-bowl/bowling-leagues/rainbowlers-league/league/statistics-png/122895",
+      "week": "Week 2"
+    }
+  },
+  "updated_at": "2026-09-22T23:45:04.075382+00:00"
+}

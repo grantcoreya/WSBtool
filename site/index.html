@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rainbowlers League Reports</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --border: #dfe3ea;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --header: #111827;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px 16px 64px;
+    }
+    header {
+      background: var(--header);
+      color: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 2rem;
+    }
+    p {
+      margin: 0;
+      color: #d5d9e2;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-top: 18px;
+    }
+    .controls label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+    }
+    select, button {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 1rem;
+    }
+    button {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+      cursor: pointer;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 12px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f8fafc;
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+    }
+    .muted {
+      color: var(--muted);
+    }
+    @media (max-width: 700px) {
+      th, td {
+        font-size: 0.92rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Rainbowlers League</h1>
+      <p>Public reports collected from League Secretary</p>
+
+      <div class="controls">
+        <label>
+          Season
+          <select id="seasonFilter">
+            <option value="all">All seasons</option>
+            <option value="Fall 2026">Fall 2026</option>
+          </select>
+        </label>
+        <button id="printButton" type="button">Print / Save PDF</button>
+      </div>
+    </header>
+
+    <div class="panel">
+      <div class="muted" id="resultCount">5 record(s)</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Season</th>
+            <th>Week</th>
+            <th>Kind</th>
+            <th>Title</th>
+            <th>Source</th>
+            <th>Fetched</th>
+          </tr>
+        </thead>
+        <tbody id="reportTable">
+          
+            <tr>
+              <td>Fall 2026</td>
+              <td>Unknown week</td>
+              <td>lane assignments</td>
+              <td>Season schedule View the complete published schedule for the current season.</td>
+              <td><a href="raw/d9ddf384bd5c8fcc0145.html" target="_blank" rel="noreferrer">raw snapshot</a></td>
+              <td>2026-09-22T23:44:19.826813+00:00</td>
+            </tr>
+            
+            <tr>
+              <td>Fall 2026</td>
+              <td>Week 2</td>
+              <td>bowler list</td>
+              <td>Bowler list Browse all league bowlers, averages, and season achievements.</td>
+              <td><a href="raw/699d0425469d788148aa.html" target="_blank" rel="noreferrer">raw snapshot</a></td>
+              <td>2026-09-22T23:45:04.075287+00:00</td>
+            </tr>
+            
+            <tr>
+              <td>Fall 2026</td>
+              <td>Week 2</td>
+              <td>recap</td>
+              <td>Interactive recaps Explore weekly recap results with bowler-level drill-downs.</td>
+              <td><a href="raw/a03304bc2e8234de47e6.html" target="_blank" rel="noreferrer">raw snapshot</a></td>
+              <td>2026-09-22T23:44:25.853302+00:00</td>
+            </tr>
+            
+            <tr>
+              <td>Fall 2026</td>
+              <td>Week 2</td>
+              <td>standings</td>
+              <td>Interactive standings Review current standings and open detailed team information.</td>
+              <td><a href="raw/418eb13220d177a8963b.html" target="_blank" rel="noreferrer">raw snapshot</a></td>
+              <td>2026-09-22T23:43:40.496892+00:00</td>
+            </tr>
+            
+            <tr>
+              <td>Fall 2026</td>
+              <td>Week 2</td>
+              <td>statistics</td>
+              <td>Weekly statistics View detailed statistics for each reported week of the season.</td>
+              <td><a href="raw/33e1bdb2ff5fbfb60f31.html" target="_blank" rel="noreferrer">raw snapshot</a></td>
+              <td>2026-09-22T23:42:59.805491+00:00</td>
+            </tr>
+            
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const seasonFilter = document.getElementById('seasonFilter');
+    const rows = [...document.querySelectorAll('#reportTable tr')];
+    const resultCount = document.getElementById('resultCount');
+
+    function refreshTable() {
+      const value = seasonFilter.value;
+      let visible = 0;
+
+      rows.forEach((row) => {
+        const cells = row.cells;
+        if (!cells || cells.length < 6) {
+          row.style.display = 'table-row';
+          return;
+        }
+
+        const seasonCell = cells[0]?.textContent?.trim() || '';
+        const show = value === 'all' || seasonCell === value;
+        row.style.display = show ? 'table-row' : 'none';
+        if (show) visible += 1;
+      });
+
+      resultCount.textContent = visible + ' record(s)';
+    }
+
+    seasonFilter.addEventListener('change', refreshTable);
+    document.getElementById('printButton').addEventListener('click', () => window.print());
+
+    refreshTable();
+  </script>
+</body>
+</html>
