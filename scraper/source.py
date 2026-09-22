@@ -98,6 +98,30 @@ class LeagueSecretaryScraper:
             }
         )
 
+    def _fetch_text(self, url: str) -> str:
+        """Fetch an HTML page from League Secretary."""
+        response = self.session.get(url, timeout=45)
+        response.raise_for_status()
+
+        content_type = response.headers.get(
+            "content-type",
+            "",
+        ).lower()
+
+        path = urlparse(url).path.lower()
+
+        # League Secretary report pages may not always provide a perfect
+        # content-type header, so allow URLs that look like HTML pages.
+        if "html" not in content_type and not path.endswith(
+            ("/", ".html")
+        ):
+            raise ValueError(
+                "Expected HTML but received "
+                f"{content_type or 'unknown content type'}"
+            )
+
+        return response.text
+    
     def run(self, backfill: bool = False) -> dict[str, Any]:
         """Discover and fetch public HTML reports.
 
