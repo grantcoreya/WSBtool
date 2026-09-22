@@ -72,6 +72,7 @@ ALLOWED_REPORT_KINDS = {
     "statistics",
 }
 
+
 class LeagueSecretaryScraper:
     """Discover and save public League Secretary HTML reports."""
 
@@ -363,7 +364,7 @@ class LeagueSecretaryScraper:
             save_diagnostics=True,
         )
 
-        def _fetch_and_store_report(
+    def _fetch_and_store_report(
         self,
         report: ReportRecord,
         state: dict[str, dict[str, Any]],
@@ -681,7 +682,7 @@ class LeagueSecretaryScraper:
             finally:
                 browser.close()
 
-        def _collect_all_report_pages(
+    def _collect_all_report_pages(
         self,
         frame: Any,
         first_page_html: str,
