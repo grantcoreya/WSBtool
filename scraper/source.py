@@ -533,26 +533,6 @@ class LeagueSecretaryScraper:
 
         path = urlparse(url).path.lower()
 
-        # These report families contain JavaScript-rendered content.
-        return any(
-            marker in path
-            for marker in (
-                "/league/standings/",
-                "/league/recaps/",
-                "/league/results/",
-                "/league/schedule/",
-                "/league/statistics/",
-                "/league/stats/",
-                "/bowler/history/",
-                "/team/history/",
-            )
-        ) and not self._is_report_family(url)
-
-    def _is_rendered_report(self, url: str) -> bool:
-        """Return True for individual interactive report pages."""
-
-        path = urlparse(url).path.lower()
-
         rendered_markers = (
             "/league/standings/",
             "/league/recaps/",
@@ -849,7 +829,7 @@ class LeagueSecretaryScraper:
             for year in years
         )
 
-      def _select_latest_relevant_reports(
+    def _select_latest_relevant_reports(
         self,
         reports: list[ReportRecord],
     ) -> list[ReportRecord]:
