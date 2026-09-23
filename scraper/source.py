@@ -683,17 +683,17 @@ class LeagueSecretaryScraper:
                 browser.close()
 
         def _collect_all_report_pages(
-        self,
-        frame: Any,
-        first_page_html: str,
-        url_hash: str,
-    ) -> str:
-        """Collect every page of a paginated Kendo report grid."""
+            self,
+            frame: Any,
+            first_page_html: str,
+            url_hash: str,
+        ) -> str:
+            """Collect every page of a paginated Kendo report grid."""
 
-        page_fragments = [
-            self._extract_table_fragment(frame)
-        ]
-        page_number = 1
+            page_fragments = [
+                self._extract_table_fragment(frame)
+            ]
+            page_number = 1
 
         while True:
             next_button = self._find_next_page_control(frame)
@@ -791,7 +791,10 @@ class LeagueSecretaryScraper:
 
         return combined_html
 
-    def _find_next_page_control(self, frame: Any) -> Any | None:
+    def _find_next_page_control(
+        self, 
+        frame: Any
+    ) -> Any | None:
         """Return the clickable, enabled Kendo next-page link."""
 
         selectors = (
@@ -1225,9 +1228,9 @@ class LeagueSecretaryScraper:
 
             if match:
                 return f"Week {match.group(1)}"
-
+                
         return "Unknown week"
-    
+        
     def _infer_kind(
         self,
         title: str,
