@@ -682,18 +682,18 @@ class LeagueSecretaryScraper:
             finally:
                 browser.close()
 
-        def _collect_all_report_pages(
-            self,
-            frame: Any,
-            first_page_html: str,
-            url_hash: str,
-        ) -> str:
-            """Collect every page of a paginated Kendo report grid."""
+    def _collect_all_report_pages(
+        self,
+        frame: Any,
+        first_page_html: str,
+        url_hash: str,
+    ) -> str:
+        """Collect every page of a paginated Kendo report grid."""
 
-            page_fragments = [
-                self._extract_table_fragment(frame)
-            ]
-            page_number = 1
+        page_fragments = [
+            self._extract_table_fragment(frame)
+        ]
+        page_number = 1
 
         while True:
             next_button = self._find_next_page_control(frame)
@@ -749,7 +749,7 @@ class LeagueSecretaryScraper:
 
             if not new_signature:
                 logger.warning(
-                    "No rows found after clicking next page %d",
+                    "No rows found after clicking page %d",
                     page_number + 1,
                 )
                 break
